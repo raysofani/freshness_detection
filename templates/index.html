@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Fruit Freshness Detector</title>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 20px;
+            text-align: center;
+            line-height: 1.6;
+        }
+        #file-upload-section, #camera-section {
+            background-color: #f4f4f4;
+            padding: 20px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+        }
+        #preview, #video, #canvas {
+            max-width: 500px;
+            margin: 20px auto;
+            border-radius: 10px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        #result {
+            margin-top: 20px;
+            font-weight: bold;
+            padding: 10px;
+            border-radius: 5px;
+        }
+        .error {
+            background-color: #ffdddd;
+            color: #ff0000;
+        }
+        .success {
+            background-color: #ddffdd;
+            color: #008000;
+        }
+        .tabs {
+            display: flex;
+            justify-content: center;
+            margin-bottom: 20px;
+        }
+        .tab {
+            padding: 10px 20px;
+            cursor: pointer;
+            background-color: #e0e0e0;
+            margin: 0 10px;
+            border-radius: 5px;
+        }
+        .tab.active {
+            background-color: #4CAF50;
+            color: white;
+        }
+    </style>
+</head>
+<body>
+    <h1>Fruit Freshness Detector</h1>
+
+    <div class="tabs">
+        <div class="tab active" data-section="file-upload">File Upload</div>
+        <div class="tab" data-section="camera">Live Camera</div>
+    </div>
+
+    <div id="file-upload-section">
+        <form id="uploadForm" enctype="multipart/form-data">
+            <input type="file" id="fileInput" name="file" accept="image/*" required>
+            <img id="preview" src="#" alt="Image Preview" style="display:none;">
+            <div id="result"></div>
+            <button type="submit">Predict Freshness</button>
+        </form>
+    </div>
+
+    <div id="camera-section" style="display:none;">
+        <div id="video-container">
+            <video id="video" width="500" height="375" autoplay></video>
+            <canvas id="canvas" width="500" height="375" style="display:none;"></canvas>
+        </div>
+
+        <div id="controls">
+            <button id="start-camera">Start Camera</button>
+            <button id="capture-photo" disabled>Capture Photo</button>
+        </div>
+        <div id="result-camera"></div>
+    </div>
+
+    <script>
+        // Tab switching
+        const tabs = document.querySelectorAll('.tab');
+        const sections = {
+            'file-upload': document.getElementById('file-upload-section'),
+            'camera': document.getElementById('camera-section')
+        };
+
+        tabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                // Remove active class from all tabs
+                tabs.forEach(t => t.classList.remove('active'));
+                
+                // Add active class to clicked tab
+                tab.classList.add('active');
+
+                // Hide all sections
+                Object.values(sections).forEach(section => {
+                    section.style.display = 'none';
+                });
+
+                // Show selected section
+                sections[tab.dataset.section].style.display = 'block';
+            });
+        });
+
+        // File Upload Section
+        const fileInput = document.getElementById('fileInput');
+        const preview = document.getElementById('preview');
+        const uploadForm = document.getElementById('uploadForm');
+        const resultDiv = document.getElementById('result');
+
+        fileInput.addEventListener('change', function(event) {
+            const file = event.target.files[0];
+            const reader = new FileReader();
+            
+            reader.onload = function(e) {
+                preview.src = e.target.result;
+                preview.style.display = 'block';
+            }
+            
+            reader.readAsDataURL(file);
+        });
+
+        uploadForm.addEventListener('submit', function(event) {
+            event.preventDefault();
+            const formData = new FormData(this);
+            
+            resultDiv.textContent = 'Processing...';
+            resultDiv.className = '';
+            
+            axios.post('/', formData, {
+                headers: {
+                    'Content-Type': 'multipart/form-data'
+                }
+            })
+            .then(response => {
+                const result = response.data;
+                if (result.error) {
+                    throw new Error(result.error);
+                }
+                
+                resultDiv.innerHTML = `
+                    <p>Predicted Class: ${result.class}</p>
+                    <p>Confidence: ${result.confidence}%</p>
+                `;
+                resultDiv.className = 'success';
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                resultDiv.textContent = error.response?.data?.error || 'Unexpected error processing image';
+                resultDiv.className = 'error';
+            });
+        });
+
+        // Camera Section
+        const video = document.getElementById('video');
+        const canvas = document.getElementById('canvas');
+        const startCameraBtn = document.getElementById('start-camera');
+        const capturePhotoBtn = document.getElementById('capture-photo');
+        const resultDivCamera = document.getElementById('result-camera');
+
+        // Start camera
+        startCameraBtn.addEventListener('click', async () => {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                video.srcObject = stream;
+                video.style.display = 'block';
+                canvas.style.display = 'none';
+                capturePhotoBtn.disabled = false;
+                startCameraBtn.disabled = true;
+            } catch (err) {
+                resultDivCamera.textContent = 'Error accessing camera: ' + err.message;
+                resultDivCamera.className = 'error';
+            }
+        });
+
+        // Capture photo and send to server
+        capturePhotoBtn.addEventListener('click', () => {
+            // Draw current video frame to canvas
+            const context = canvas.getContext('2d');
+            context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+            // Convert canvas to blob
+            canvas.toBlob(blob => {
+                const formData = new FormData();
+                formData.append('file', blob, 'captured-image.jpg');
+
+                // Reset result
+                resultDivCamera.textContent = 'Processing...';
+                resultDivCamera.className = '';
+
+                // Send to server
+                axios.post('/', formData, {
+                    headers: {
+                        'Content-Type': 'multipart/form-data'
+                    }
+                })
+                .then(response => {
+                    const result = response.data;
+                    if (result.error) {
+                        throw new Error(result.error);
+                    }
+
+                    resultDivCamera.innerHTML = `
+                        <p>Predicted Class: ${result.class}</p>
+                        <p>Confidence: ${result.confidence}%</p>
+                    `;
+                    resultDivCamera.className = 'success';
+
+                    // Show captured image
+                    video.style.display = 'none';
+                    canvas.style.display = 'block';
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    resultDivCamera.textContent = error.response?.data?.error || 'Unexpected error processing image';
+                    resultDivCamera.className = 'error';
+                });
+            }, 'image/jpeg');
+        });
+    </script>
+</body>
+</html>
